@@ -45,7 +45,7 @@ def load_artifacts():
     encoder_path = os.path.join("model", "label_encoder.joblib") if os.path.exists(os.path.join("model", "label_encoder.joblib")) else "label_encoder.joblib"
 
     scaler = joblib.load(scaler_path) if os.path.exists(scaler_path) else None
-    encoder = joblib.load(encoder_path) if os.path.exists(encoder_path) else None
+    encoder = joblib.load(encoder_path) if os.path.exists(encoder_path) else {0: 'Graduate', 1: 'Dropout'}
 
     return model, scaler, encoder
 
@@ -55,6 +55,14 @@ except Exception as e:
     st.error(f"Gagal memuat artefak model: {e}")
     st.stop()
 
+# Helper untuk decode label biner baik berupa dict maupun LabelEncoder
+def decode_label(pred_val):
+    if isinstance(encoder, dict):
+        return encoder.get(int(pred_val), "Dropout" if pred_val == 1 else "Graduate")
+    elif hasattr(encoder, "inverse_transform"):
+        return encoder.inverse_transform([pred_val])[0]
+    return "Dropout" if pred_val == 1 else "Graduate"
+
 # PANEL SIDEBAR (INFORMASI INSTITUSI & PROFIL MODEL)
 with st.sidebar:
     st.title("ℹ️ Info Institusi")
@@ -62,8 +70,8 @@ with st.sidebar:
     st.divider()
     
     st.markdown("### ⚙️ Profil Model")
-    st.write("- **Algoritma:** Random Forest Classifier")
-    st.write("- **Target:** Status Kelulusan Mahasiswa")
+    st.write("- **Algoritma:** Random Forest Classifier (Binary)")
+    st.write("- **Target:** Status Kelulusan (Graduate vs Dropout)")
     
     # Visualisasi Top 5 Feature Importance yang dipelajari oleh model
     if hasattr(model, "feature_importances_") and hasattr(model, "feature_names_in_"):
@@ -115,8 +123,10 @@ st.write("")
 
 # PIPELINE PREPROCESSING & INFERENSI DATA
 def run_pipeline(custom_input):
+    # Buat baris referensi fitur dari clean data
     df_clean = pd.read_csv('clean_students_performance.csv')
-    df_template = df_clean.drop(columns=['Status']) if 'Status' in df_clean.columns else df_clean
+    drop_cols = [c for c in ['Status', 'Status_Binary'] if c in df_clean.columns]
+    df_template = df_clean.drop(columns=drop_cols)
     sample = df_template.iloc[[0]].copy()
 
     for k, v in custom_input.items():
@@ -132,7 +142,7 @@ def run_pipeline(custom_input):
     processed = scaler.transform(sample) if scaler is not None else sample
     pred = model.predict(processed)[0]
     prob = model.predict_proba(processed)[0] if hasattr(model, "predict_proba") else None
-    label = encoder.inverse_transform([pred])[0] if encoder is not None else str(pred)
+    label = decode_label(pred)
     return label, prob
 
 # EKSEKUSI PREDIKSI & VISUALISASI HASIL
@@ -156,7 +166,7 @@ if st.button("🔍 Jalankan Analisis Risiko", type="primary", use_container_widt
 
     status_result, proba = run_pipeline(current_data)
     
-    # Menyimpan hasil ke session_state agar tidak ter-reset saat widget interaktif digeser
+    # Menyimpan hasil ke session_state
     st.session_state['has_predicted'] = True
     st.session_state['current_data'] = current_data
     st.session_state['status_result'] = status_result
@@ -177,25 +187,22 @@ if st.session_state.get('has_predicted', False):
         if status_result == "Dropout":
             st.error(f"### Status Prediksi: {status_result}")
             st.markdown("**Tingkat Risiko: 🔴 TINGGI (Rawan Putus Studi)**")
-        elif status_result == "Enrolled":
-            st.info(f"### Status Prediksi: {status_result}")
-            st.markdown("**Tingkat Risiko: 🟡 SEDANG (Perlu Supervisi Akademik)**")
         else:
             st.success(f"### Status Prediksi: {status_result}")
             st.markdown("**Tingkat Risiko: 🟢 RENDAH (Prospek Kelulusan Baik)**")
 
-        if proba is not None and encoder is not None and "Dropout" in encoder.classes_:
-            dropout_idx = list(encoder.classes_).index("Dropout")
-            risk_pct = float(proba[dropout_idx])
-            st.metric(label="Skor Probabilitas Dropout", value=f"{risk_pct * 100:.1f}%")
+        if proba is not None and len(proba) >= 2:
+            # Model biner: proba[0] = Graduate, proba[1] = Dropout
+            risk_pct = float(proba[1])
+            st.metric(label="Skor Probabilitas Risiko Dropout", value=f"{risk_pct * 100:.1f}%")
             st.progress(risk_pct)
 
     with res2:
-        if proba is not None and encoder is not None:
+        if proba is not None and len(proba) >= 2:
             st.markdown("**Distribusi Probabilitas:**")
             prob_df = pd.DataFrame({
-                'Kategori Status': encoder.classes_,
-                'Probabilitas': [f"{p*100:.2f}%" for p in proba]
+                'Kategori Status': ['Graduate (Lulus)', 'Dropout (Putus Studi)'],
+                'Probabilitas': [f"{proba[0]*100:.2f}%", f"{proba[1]*100:.2f}%"]
             })
             st.dataframe(prob_df, use_container_width=True, hide_index=True)
 
@@ -244,19 +251,16 @@ if st.session_state.get('has_predicted', False):
     
     sim_status, sim_proba = run_pipeline(sim_data)
 
-    if sim_proba is not None and encoder is not None and "Dropout" in encoder.classes_:
-        dropout_idx = list(encoder.classes_).index("Dropout")
-        grad_idx = list(encoder.classes_).index("Graduate") if "Graduate" in encoder.classes_ else None
-        
-        old_risk = float(proba[dropout_idx]) * 100
-        new_risk = float(sim_proba[dropout_idx]) * 100
+    if proba is not None and sim_proba is not None and len(sim_proba) >= 2:
+        old_risk = float(proba[1]) * 100
+        new_risk = float(sim_proba[1]) * 100
         delta_risk = new_risk - old_risk
         
         m1, m2 = st.columns(2)
         m1.metric("Status Pasca-Intervensi", sim_status)
-        m2.metric("Peluang Risiko Dropout", f"{new_risk:.1f}%", f"{delta_risk:.1f}% (Penurunan)", delta_color="inverse")
+        m2.metric("Peluang Risiko Dropout", f"{new_risk:.1f}%", f"{delta_risk:.1f}%", delta_color="inverse")
 
-    # SECTION 10: REKOMENDASI TINDAKAN BISNIS / STRATEGIS
+    # REKOMENDASI TINDAKAN BISNIS / STRATEGIS
     st.markdown("### 💡 Rekomendasi Intervensi Kampus")
     if status_result == "Dropout" or current_data['Tuition_fees_up_to_date'] == 0 or current_data['Curricular_units_2nd_sem_approved'] < 3:
         st.warning("""
