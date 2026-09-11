@@ -55,7 +55,7 @@ except Exception as e:
     st.error(f"Gagal memuat artefak model: {e}")
     st.stop()
 
-# Helper untuk decode label biner baik berupa dict maupun LabelEncoder
+# Helper untuk decode label biner
 def decode_label(pred_val):
     if isinstance(encoder, dict):
         return encoder.get(int(pred_val), "Dropout" if pred_val == 1 else "Graduate")
@@ -73,7 +73,7 @@ with st.sidebar:
     st.write("- **Algoritma:** Random Forest Classifier (Binary)")
     st.write("- **Target:** Status Kelulusan (Graduate vs Dropout)")
     
-    # Visualisasi Top 5 Feature Importance yang dipelajari oleh model
+    # Visualisasi Top 5 Feature Importance
     if hasattr(model, "feature_importances_") and hasattr(model, "feature_names_in_"):
         st.markdown("### 📌 5 Faktor Penentu Utama")
         fi_df = pd.DataFrame({
@@ -100,9 +100,9 @@ with col1:
     st.markdown("##### 📌 Demografi & Administrasi")
     age = st.number_input("Usia Saat Mendaftar", min_value=15, max_value=70, value=20)
     gender = st.selectbox("Jenis Kelamin", options=[1, 0], format_func=lambda x: "Laki-laki" if x == 1 else "Perempuan")
-    debtor = st.selectbox("Memiliki Tunggakan Utang?", options=[0, 1], format_func=lambda x: "Ya" if x == 1 else "Tidak")
-    tuition = st.selectbox("Status Pembayaran SPP", options=[1, 0], format_func=lambda x: "Lancar / Lunas" if x == 1 else "Menunggak")
-    scholarship = st.selectbox("Penerima Beasiswa?", options=[1, 0], format_func=lambda x: "Ya" if x == 1 else "Tidak")
+    debtor = st.selectbox("Memiliki Tunggakan Utang?", options=[1, 0], index=1, format_func=lambda x: "Ya" if x == 1 else "Tidak")
+    tuition = st.selectbox("Status Pembayaran SPP", options=[1, 0], index=0, format_func=lambda x: "Lancar / Lunas" if x == 1 else "Menunggak")
+    scholarship = st.selectbox("Penerima Beasiswa?", options=[1, 0], index=1, format_func=lambda x: "Ya" if x == 1 else "Tidak")
 
 with col2:
     st.markdown("##### 📚 Evaluasi Semester 1")
@@ -123,15 +123,21 @@ st.write("")
 
 # PIPELINE PREPROCESSING & INFERENSI DATA
 def run_pipeline(custom_input):
-    # Buat baris referensi fitur dari clean data
     df_clean = pd.read_csv('clean_students_performance.csv')
     drop_cols = [c for c in ['Status', 'Status_Binary'] if c in df_clean.columns]
-    df_template = df_clean.drop(columns=drop_cols)
-    sample = df_template.iloc[[0]].copy()
+    df_features = df_clean.drop(columns=drop_cols)
+    
+    # Gunakan median seluruh data agar fitur yang tidak ada di form bernilai netral
+    sample = pd.DataFrame([df_features.median(numeric_only=True)])
 
+    # Pencocokan nama kolom secara case-insensitive
+    feature_cols_lower = {col.lower(): col for col in df_features.columns}
     for k, v in custom_input.items():
-        sample[k] = v
+        if k.lower() in feature_cols_lower:
+            actual_col = feature_cols_lower[k.lower()]
+            sample[actual_col] = v
 
+    # Urutkan kolom persis seperti urutan saat training
     expected_cols = getattr(scaler, "feature_names_in_", getattr(model, "feature_names_in_", None))
     if expected_cols is not None:
         for c in expected_cols:
@@ -145,7 +151,7 @@ def run_pipeline(custom_input):
     label = decode_label(pred)
     return label, prob
 
-# EKSEKUSI PREDIKSI & VISUALISASI HASIL
+# EKSEKUSI PREDIKSI & PENYIMPANAN STATE
 if st.button("🔍 Jalankan Analisis Risiko", type="primary", use_container_width=True):
     current_data = {
         'Admission_grade': float(admission_grade),
@@ -165,14 +171,12 @@ if st.button("🔍 Jalankan Analisis Risiko", type="primary", use_container_widt
     }
 
     status_result, proba = run_pipeline(current_data)
-    
-    # Menyimpan hasil ke session_state
     st.session_state['has_predicted'] = True
     st.session_state['current_data'] = current_data
     st.session_state['status_result'] = status_result
     st.session_state['proba'] = proba
 
-# Menampilkan hasil jika analisis sudah pernah dijalankan
+# MENAMPILKAN HASIL JIKA SUDAH DIKLIK
 if st.session_state.get('has_predicted', False):
     current_data = st.session_state['current_data']
     status_result = st.session_state['status_result']
@@ -192,7 +196,7 @@ if st.session_state.get('has_predicted', False):
             st.markdown("**Tingkat Risiko: 🟢 RENDAH (Prospek Kelulusan Baik)**")
 
         if proba is not None and len(proba) >= 2:
-            # Model biner: proba[0] = Graduate, proba[1] = Dropout
+            # Kelas 0: Graduate, Kelas 1: Dropout
             risk_pct = float(proba[1])
             st.metric(label="Skor Probabilitas Risiko Dropout", value=f"{risk_pct * 100:.1f}%")
             st.progress(risk_pct)
@@ -216,13 +220,13 @@ if st.session_state.get('has_predicted', False):
         sim_tuition = st.selectbox(
             "Skenario SPP:", 
             options=[1, 0], 
-            index=0 if current_data['Tuition_fees_up_to_date'] == 1 else 0, 
+            index=0 if current_data['Tuition_fees_up_to_date'] == 1 else 1, 
             format_func=lambda x: "SPP Dilunasi / Diberi Keringanan" if x == 1 else "SPP Tetap Menunggak"
         )
         sim_debtor = st.selectbox(
             "Skenario Utang:", 
             options=[0, 1], 
-            index=0 if current_data['Debtor'] == 0 else 0, 
+            index=0 if current_data['Debtor'] == 0 else 1, 
             format_func=lambda x: "Bebas Tunggakan Utang" if x == 0 else "Masih Memiliki Utang"
         )
     with sim_col2:
@@ -230,16 +234,16 @@ if st.session_state.get('has_predicted', False):
         max_enrolled = int(max(current_data['Curricular_units_2nd_sem_enrolled'], 10))
         sim_sem2_approved = st.slider(
             "Target Tambahan SKS Lulus Sem 2:", 
-            min_value=base_approved, 
+            min_value=0, 
             max_value=max_enrolled, 
             value=base_approved
         )
         base_grade = float(current_data['Curricular_units_2nd_sem_grade'])
         sim_sem2_grade = st.slider(
             "Target Nilai Rata-rata Sem 2:", 
-            min_value=base_grade, 
+            min_value=0.0, 
             max_value=20.0, 
-            value=float(max(base_grade, 12.0)), 
+            value=base_grade, 
             step=0.5
         )
 
@@ -258,15 +262,15 @@ if st.session_state.get('has_predicted', False):
         
         m1, m2 = st.columns(2)
         m1.metric("Status Pasca-Intervensi", sim_status)
-        m2.metric("Peluang Risiko Dropout", f"{new_risk:.1f}%", f"{delta_risk:.1f}%", delta_color="inverse")
+        m2.metric("Peluang Risiko Dropout", f"{new_risk:.1f}%", f"{delta_risk:+.1f}%", delta_color="inverse")
 
     # REKOMENDASI TINDAKAN BISNIS / STRATEGIS
     st.markdown("### 💡 Rekomendasi Intervensi Kampus")
     if status_result == "Dropout" or current_data['Tuition_fees_up_to_date'] == 0 or current_data['Curricular_units_2nd_sem_approved'] < 3:
         st.warning("""
         * **Intervensi Keuangan Cepat:** Hubungkan mahasiswa dengan program beasiswa darurat atau restrukturisasi cicilan pembayaran SPP.
-        * **Pendampingan Akademik Intensif:** Wajibkan sesi pembimbingan berkala dengan Dosen Pembimbing Akademik (DPA) untuk merancang ulang rencana studi.
-        * **Layanan Konseling Mahasiswa:** Lakukan penelusuran motivasi belajar serta adaptasi perkuliahan via bimbingan konseling kampus.
+        * **Pendampingan Akademik Intensif:** Wajibkan sesi pembimbingan berkala dengan Dosen Pembimbing Akademik (DPA) untuk merancang ulang rencana studi remedial.
+        * **Layanan Konseling Mahasiswa:** Lakukan evaluasi motivasi belajar serta kesiapan kuliah via pusat bimbingan konseling kampus.
         """)
     else:
         st.success("""
