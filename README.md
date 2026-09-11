@@ -21,9 +21,8 @@ Jaya Jaya Institut merupakan salah satu institusi pendidikan perguruan tinggi ya
 ## Persiapan
 
 ### Sumber Data
-Dataset yang digunakan dalam proyek ini adalah *Students' Performance Dataset* yang disediakan oleh Dicoding:
-* **Tautan Sumber Data**: [`data.csv`](https://raw.githubusercontent.com/dicodingacademy/dicoding_dataset/main/students_performance/data.csv)
-* **URL**: `[https://raw.githubusercontent.com/dicodingacademy/dicoding_dataset/main/students_performance/data.csv](https://raw.githubusercontent.com/dicodingacademy/dicoding_dataset/main/students_performance/data.csv)`
+Dataset yang digunakan dalam proyek ini adalah *Students' Performance Dataset* yang disediakan oleh Dicoding / Jaya Jaya Institut:
+* **Tautan Dataset**: [Students Performance Data (data.csv)](https://raw.githubusercontent.com/dicodingacademy/dicoding_dataset/main/students_performance/data.csv)
 
 ### Setup Environment
 Proyek ini dikembangkan menggunakan Python versi 3.10.
